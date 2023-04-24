@@ -21,3 +21,16 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Terraform directories
+.terraform/
+terraform.tfstate*
+*.tfstate*
+
+# Ignore any temporary files
+*.tfplan
+*.tfout
+*.log
+*.backup
+*.retry
+*.swp
