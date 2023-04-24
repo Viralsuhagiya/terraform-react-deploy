@@ -12,14 +12,6 @@ provider "aws" {
 
 # provider "docker" {}
 
-resource "aws_ecr_repository" "react_terrafrom_app" {
-  name = "react_terrafrom_app"
-}
-
-resource "aws_ecs_cluster" "react_terraform_cluster" {
-  name = "react_terraform_cluster"
-}
-
 # resource "docker_image" "my_image" {
 #   name          = "${aws_ecr_repository.react_terrafrom_app.repository_url}:latest"
 #   build  {
@@ -28,76 +20,81 @@ resource "aws_ecs_cluster" "react_terraform_cluster" {
 #   }
 # }
 
-output "image_url" {
-  value = "${aws_ecr_repository.react_terrafrom_app.repository_url}:latest"
+resource "aws_ecr_repository" "react_terrafrom_app" {
+  name = "react_terrafrom_app"
 }
 
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "ecs_task_execution_role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ecs-tasks.amazonaws.com"
-        }
-      }
-    ]
-  })
+resource "aws_ecs_cluster" "react_terraform_cluster" {
+  name = "react_terraform_cluster"
 }
 
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy_attachment" {
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-  role       = aws_iam_role.ecs_task_execution_role.name
-}
-
-resource "aws_ecs_task_definition" "react_terraform_task_defination" {
+resource "aws_ecs_task_definition" "react_terraform_task_definition" {
   family                   = "react-terraform-task"
   cpu                      = 256   
   memory                   = 512  
-  
-
   container_definitions    = jsonencode([
     {
-      name      = "react-terraform-app"
-      image     = "${aws_ecr_repository.react_terrafrom_app.repository_url}:latest"
-      cpu       = 256
-      memory    = 512
-      essential = true
-      log_configuration = {
-        log_driver = "awslogs"
-        options = {
-          "awslogs-group" = "terraform-task-defination-logs"
-          "awslogs-region" = "us-east-1"
-          "awslogs-stream-prefix" = "terraform"
+      name             = "react-terraform-task"
+      image            = "158211228743.dkr.ecr.us-east-1.amazonaws.com/react_terrafrom_app:latest"
+      essential        = true
+      portMappings     = [
+        {
+          containerPort = 3000
+          hostPort      = 3000
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options   = {
+          "awslogs-group"         = aws_cloudwatch_log_group.log_group.name
+          "awslogs-region"        = "us-east-1"
+          "awslogs-stream-prefix" = "terraform-stream"
         }
       }
-      portMappings = [
-        {
-          containerPort = 80
-          hostPort      = 80
-        },
-      ]
-    },
+      memory           = 512
+      cpu              = 256
+    }
   ])
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  task_role_arn      = aws_iam_role.ecs_task_execution_role.arn
-  execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+  execution_role_arn       = aws_iam_role.ecsTaskExecutionRole.arn
 }
 
-resource "aws_ecs_service" "my_service" {
-  name            = "react-terraform-service"
+resource "aws_cloudwatch_log_group" "log_group" {
+  name = "/ecs/terraform"
+}
+
+
+resource "aws_iam_role" "ecsTaskExecutionRole" {
+  name               = "ecsTaskExecutionRole"
+  assume_role_policy = "${data.aws_iam_policy_document.assume_role_policy.json}"
+}
+
+data "aws_iam_policy_document" "assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ecsTaskExecutionRole_policy" {
+  role       = "${aws_iam_role.ecsTaskExecutionRole.name}"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_ecs_service" "ecsService" {
+  name            = "react-terraform-service-ld"
   cluster         = aws_ecs_cluster.react_terraform_cluster.id
-  task_definition = aws_ecs_task_definition.react_terraform_task_defination.arn
+  task_definition = aws_ecs_task_definition.react_terraform_task_definition.arn
   desired_count   = 1
   launch_type     = "FARGATE"
 
   network_configuration {
-    security_groups = ["${aws_security_group.my_security_group.id}"]
+    security_groups = ["${aws_security_group.service_security_group.id}"]
     subnets = [
         aws_subnet.subnet1.id,
         aws_subnet.subnet2.id,
@@ -105,11 +102,35 @@ resource "aws_ecs_service" "my_service" {
   }
 
   load_balancer {
-    target_group_arn = "${aws_lb_target_group.my_target_group.arn}"
-    container_name   = "react-terraform-app"
-    container_port   = 80
+    target_group_arn = "${aws_lb_target_group.target_group.arn}"
+    container_name   = "${aws_ecs_task_definition.react_terraform_task_definition.family}"
+    container_port   = 3000 # Specifying the container port
+  }
+
+}
+
+resource "aws_security_group" "service_security_group" {
+  name        = "react-app-demo"
+  vpc_id = aws_vpc.my_vpc.id
+  ingress {
+    description      = "Allow HTTP from anywhere"
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+   egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
   }
 }
+
+
+
 resource "aws_vpc" "my_vpc" {
   cidr_block = "10.0.0.0/16"
   tags = {
@@ -117,12 +138,22 @@ resource "aws_vpc" "my_vpc" {
   }
 }
 
-output "load_balancer_url" {
-  value = "${aws_lb.my_lb.dns_name}"
-}
-
 resource "aws_internet_gateway" "gw" {
   vpc_id = aws_vpc.my_vpc.id
+}
+
+
+
+resource "aws_subnet" "subnet1" {
+  vpc_id = "${aws_vpc.my_vpc.id}"
+  cidr_block = "10.0.3.0/24"
+  availability_zone = "us-east-1a"
+}
+
+resource "aws_subnet" "subnet2" {
+  vpc_id     = aws_vpc.my_vpc.id
+  cidr_block = "10.0.4.0/24"
+  availability_zone = "us-east-1b"
 }
 
 
@@ -151,35 +182,28 @@ resource "aws_route_table_association" "b" {
 
 resource "aws_lb" "my_lb" {
   name               = "my-lb"
-  internal           = false
   load_balancer_type = "application"
   subnets = [
         aws_subnet.subnet1.id,
         aws_subnet.subnet2.id,
     ]
-  security_groups    = ["${aws_security_group.my_security_group.id}"]
-
+  security_groups    = ["${aws_security_group.service_security_group.id}"]
   tags = {
     Name = "my_lb"
   }
 }
 
-resource "aws_lb_target_group" "my_target_group" {
-  name        = "my-target-group"
+resource "aws_lb_target_group" "target_group" {
+  name        = "target-group"
   port        = 80
   protocol    = "HTTP"
-  vpc_id      = "${aws_vpc.my_vpc.id}"
   target_type = "ip"
-
+  vpc_id      = "${aws_vpc.my_vpc.id}"# Referencing the default VPC
   health_check {
+    matcher = "200,301,302"
     path = "/"
   }
-
-  tags = {
-    Name = "my_target_group"
-  }
 }
-
 
 resource "aws_lb_listener" "my_listener" {
   load_balancer_arn = aws_lb.my_lb.arn
@@ -188,38 +212,14 @@ resource "aws_lb_listener" "my_listener" {
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.my_target_group.arn
+    target_group_arn = "${aws_lb_target_group.target_group.arn}"
   }
 }
 
-
-resource "aws_security_group" "my_security_group" {
-  name_prefix = "my-security-group-"
-  vpc_id      = "${aws_vpc.my_vpc.id}"
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+output "load_balancer_url" {
+  value = "${aws_lb.my_lb.dns_name}"
 }
 
-resource "aws_subnet" "subnet1" {
-  vpc_id = "${aws_vpc.my_vpc.id}"
-  cidr_block = "10.0.3.0/24"
-  availability_zone = "us-east-1a"
-}
-
-resource "aws_subnet" "subnet2" {
-  vpc_id     = aws_vpc.my_vpc.id
-  cidr_block = "10.0.4.0/24"
-  availability_zone = "us-east-1b"
+output "image_url" {
+  value = "${aws_ecr_repository.react_terrafrom_app.repository_url}:latest"
 }

@@ -1,14 +1,21 @@
 FROM node:16-alpine
-
+# set working directory
 WORKDIR /app
-COPY package*.json ./
-RUN npm install --force
-COPY . .
-RUN npm run build
 
-# Define container health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://localhost:80/ || exit 1
+# add `/app/node_modules/.bin` to $PATH
+ENV PATH /app/node_modules/.bin:$PATH
 
-EXPOSE 80
-CMD ["npm", "run", "start"]
+# install app dependencies
+COPY package.json ./
+COPY package-lock.json ./
+RUN npm install --silent
+RUN npm install react-scripts@3.4.1 -g --silent
+
+# add app
+COPY . ./
+
+# Make port 3000 available to the world outside this container
+EXPOSE 3000
+
+# start app
+CMD ["npm", "start"]
