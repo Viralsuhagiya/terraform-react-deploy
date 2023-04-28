@@ -28,8 +28,8 @@ terraform.tfstate*
 *.tfstate*
 
 # Ignore any temporary files
-*.tfplan
-*.tfout
+*.tfvars
+*.tfplan*.tfout
 *.log
 *.backup
 *.retry
